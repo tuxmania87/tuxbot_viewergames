@@ -184,14 +184,22 @@ class Game:
         requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid), headers=header,
                            json=msgjson)
 
-    def makeChatMove(self):
+    def makeChatMove(self, lastMove):
         failcnt = 0
         move = None
         wasRandom = False
+
+        pollOpenMessage = ""
+
         while move is None and failcnt < 3:
 
-            self.sendMessage(" === POLL OPEN === Write your move, poll closes in {} seconds".format(
-                self.vote_time))
+            if not lastMove is None:
+                pollOpenMessage = "Player did {} === POLL OPEN === Write your move, poll closes in {} seconds".format(lastMove,
+                self.vote_time)
+            else:
+                pollOpenMessage = " === POLL OPEN === Write your move, poll closes in {} seconds".format(
+                self.vote_time)
+            self.sendMessage(pollOpenMessage)
 
             chatDict[self.twitch_channel] = list()
             time.sleep(self.vote_time)
@@ -345,7 +353,7 @@ class Game:
 
                     if amIwhite:
 
-                        self.makeChatMove()
+                        self.makeChatMove(None)
 
                 if j["type"] == "gameFull":
 
@@ -417,7 +425,7 @@ class Game:
                         self.b.push(chess.Move.from_uci(lastmove))
 
                         # chat interaction in order to determine next move:
-                        self.makeChatMove()
+                        self.makeChatMove(lastmove)
 
 
 if __name__ == "__main__":
