@@ -287,6 +287,8 @@ class Game:
                     if len(text.split(" ")) == 2:
                         self.twitch_channel, self.vote_time = text.split(" ")
 
+                        self.twitch_channel = self.twitch_channel.lower()
+                        
                         # lookup if lichess account is allowed to connect to mentioned twitch channel
                         if self.twitch_channel not in whitelist:
                             msg = "The mentioned twitch channel is not on the whitelist"
