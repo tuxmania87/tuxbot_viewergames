@@ -384,7 +384,7 @@ class Game:
                     # check if resigned
                     status = j["status"]
 
-                    if status in ["resign", "aborted", "mate"]:
+                    if status in ["resign", "aborted", "mate", "draw"]:
                         try:
                             activeGames.remove(self.twitch_channel)
                         except:
