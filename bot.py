@@ -10,8 +10,9 @@ import random
 
 header = ""
 chatDict = {}
-whitelist = { "tuxmania": ["tuxmania"]}
+whitelist = {"tuxmania": ["tuxmania"]}
 activeGames = []
+
 
 class Game:
 
@@ -57,8 +58,9 @@ class Game:
         string_list = list(move)
 
         # german to english translation
-        if string_list[0] in translationDictionary:
-            string_list[0] = translationDictionary[string_list[0]]
+        for i in range(0,len(string_list)):
+            if string_list[i] in translationDictionary:
+                string_list[i] = translationDictionary[string_list[i]]
 
         # char array to string
         m = "".join(string_list)
@@ -119,13 +121,11 @@ class Game:
             message = message.replace("\r", "").replace("\n", "")
             message = self.handleMove(message)
 
-
             # try to parse message as UCI move ( e4e5)
             try:
                 chess.Move.from_uci(message)
                 move = message
             except:
-
 
                 # if that didnt work try to apply the move on the current board
                 # by using algebraic SAN moe "e4 Nf3 Qxb4"
@@ -178,11 +178,10 @@ class Game:
 
         return maxmove, max, multipleCandidates
 
-
     def writeToLichessChat(self, message):
         msgjson = {"room": "player", "text": message}
         requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid), headers=header,
-                           json=msgjson)
+                      json=msgjson)
 
     def makeChatMove(self, lastMove):
         failcnt = 0
@@ -194,11 +193,12 @@ class Game:
         while move is None and failcnt < 3:
 
             if not lastMove is None:
-                pollOpenMessage = "Player did {} === POLL OPEN === Write your move, poll closes in {} seconds".format(lastMove,
-                self.vote_time)
+                pollOpenMessage = "Player did {} === POLL OPEN === Write your move, poll closes in {} seconds".format(
+                    lastMove,
+                    self.vote_time)
             else:
                 pollOpenMessage = " === POLL OPEN === Write your move, poll closes in {} seconds".format(
-                self.vote_time)
+                    self.vote_time)
             self.sendMessage(pollOpenMessage)
 
             chatDict[self.twitch_channel] = list()
@@ -227,21 +227,49 @@ class Game:
 
         print(move, cnt)
 
+        playerSANmove = self.b.san(move)
+        playerSANmove = self.moveToGerman(playerSANmove)
+
         self.b.push(move)
         # write message to chat
-        message = " === POLL CLOSED === Move {} won with {} votes.".format(move, cnt)
+        message = " === POLL CLOSED === Move {} won with {} votes.".format(playerSANmove, cnt)
 
         if wasRandom:
             message = " === POLL CLOSED === Move {} won with {} votes (randomly chosen between same votes).".format(
-                move, cnt)
+                playerSANmove, cnt)
 
         self.sendMessage(message)
 
         _r = requests.post("https://lichess.org/api/bot/game/{}/move/{}".format(self.gameid, move),
                            headers=header)
 
-    def playGame(self):
+    def moveToGerman(self, move):
 
+        translateDict = {
+            "N": "S",
+            "R": "T",
+            "B": "L",
+            "Q": "D"
+        }
+
+        # decompose string into char list since we need to replace first letter
+        string_list = list(move)
+
+        # german to english translation
+        for i in range(0, len(string_list)):
+            if string_list[i] in translateDict:
+                string_list[i] = translateDict[string_list[i]]
+
+        # char array to string
+        m = "".join(string_list)
+
+        return m
+
+
+
+
+
+    def playGame(self):
 
         requests.post("https://lichess.org/api/challenge/{}/accept".format(self.gameid), headers=header)
 
@@ -254,7 +282,6 @@ class Game:
 
         amIwhite = False
 
-
         # read all events from game stream
         for line in r.iter_lines():
 
@@ -265,7 +292,7 @@ class Game:
             if (decoded_line != ''):
 
                 j = json.loads(decoded_line)
-                #print("XX ", j)
+                # print("XX ", j)
 
                 # if game type finish, remove game from active game list
                 # and go out of run function
@@ -288,7 +315,7 @@ class Game:
                         self.twitch_channel, self.vote_time = text.split(" ")
 
                         self.twitch_channel = self.twitch_channel.lower()
-                        
+
                         # lookup if lichess account is allowed to connect to mentioned twitch channel
                         if self.twitch_channel not in whitelist:
                             msg = "The mentioned twitch channel is not on the whitelist"
@@ -305,8 +332,8 @@ class Game:
 
                         # if channel is in whitelist but user not allowed to start the bot
                         if self.twitch_channel in whitelist and j["username"].lower() not in [x.lower() for x in
-                                                                                         whitelist[self.twitch_channel]]:
-
+                                                                                              whitelist[
+                                                                                                  self.twitch_channel]]:
                             msg = "You are not allowed to start the bot for this twitch channel."
                             self.writeToLichessChat(msg)
 
@@ -347,14 +374,14 @@ class Game:
                     self.getTwitchSocket()
 
                     #  start twitch chat reader async
-                    twitch_thread = threading.Thread(target=self.startChatRead, args=(self.twitch_socket,self.twitch_channel))
+                    twitch_thread = threading.Thread(target=self.startChatRead,
+                                                     args=(self.twitch_socket, self.twitch_channel))
                     twitch_thread.start()
 
                     msg = "Configuration finished"
                     self.writeToLichessChat(msg)
 
                     if amIwhite:
-
                         self.makeChatMove(None)
 
                 if j["type"] == "gameFull":
@@ -403,7 +430,8 @@ class Game:
                         msg = "To set bot up, please reply with following message, vote time has to be between 10 and 60, twitch channel name is case sensitive"
 
                         msgjson = {"room": "player", "text": msg}
-                        _r = requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid), headers=header,
+                        _r = requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid),
+                                           headers=header,
                                            json=msgjson)
                         print(_r.json())
 
@@ -411,7 +439,8 @@ class Game:
 
                         msg = "<TWITCH_CHANNELNAME> <vote time in seconds>"
                         msgjson = {"room": "player", "text": msg}
-                        _r = requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid), headers=header,
+                        _r = requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid),
+                                           headers=header,
                                            json=msgjson)
                         print(_r.json())
 
@@ -419,15 +448,18 @@ class Game:
                     evenlist = len(moves.split(" ")) % 2 == 0
 
                     if (not evenlist and not amIwhite) or (evenlist and amIwhite):
-
                         # receive last move of player
                         lastmove = moves.split(" ")[-1]
+
+                        # get last move as SAN notation
+                        playerSANmove = self.b.san(chess.Move.from_uci(lastmove))
+                        playerSANmove = self.moveToGerman(playerSANmove)
 
                         # play last move on the board
                         self.b.push(chess.Move.from_uci(lastmove))
 
                         # chat interaction in order to determine next move:
-                        self.makeChatMove(lastmove)
+                        self.makeChatMove(playerSANmove)
 
 
 if __name__ == "__main__":
@@ -456,12 +488,11 @@ if __name__ == "__main__":
     with open('whitelist.txt', 'r') as read_file:
         whitelist = json.load(read_file)
 
-
     print(token, twitch_token)
 
     for line in r.iter_lines():
         decoded_line = line.decode('utf-8')
-        if(decoded_line != ''):
+        if (decoded_line != ''):
 
             j = json.loads(decoded_line)
             print(j["type"], decoded_line)
