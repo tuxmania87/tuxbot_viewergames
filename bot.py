@@ -10,20 +10,18 @@ import random
 
 header = ""
 chatDict = {}
-whitelist = {"tuxmania": ["tuxmania"]}
+whitelist = {"tuxmania": "tuxmanischerTiger"}
 activeGames = []
 
 
 class Game:
 
-    def __init__(self, gameid):
+    def __init__(self, gameid, twitch_channel, vote_time):
         self.gameid = gameid
 
-        self.configured = False
-        self.twitch_channel = None
-        self.user_time = None
+        self.twitch_channel = twitch_channel
         self.twitch_socket = None
-        self.vote_time = 0
+        self.vote_time = vote_time
         self.b = None
 
         self.playGame()
@@ -120,6 +118,7 @@ class Game:
             # strip LF and CR
             message = message.replace("\r", "").replace("\n", "")
             message = self.handleMove(message)
+            move = None
 
             # try to parse message as UCI move ( e4e5)
             try:
@@ -135,13 +134,18 @@ class Game:
                     board.pop()
                 except:
 
-                    # if neither UCI nor SAN, it was not a legal move, go to next message
-                    continue
+                    if message.strip().lower() == "resign":
+                        move = "resign"
+
+                    else:
+                        # if neither UCI nor SAN, it was not a legal move, go to next message
+                        continue
 
             # check if move is legal
             test_board = board.copy()
             try:
-                test_board.push(move)
+                if move != "resign":
+                    test_board.push(move)
             except:
                 continue
 
@@ -183,6 +187,8 @@ class Game:
         requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid), headers=header,
                       json=msgjson)
 
+        return
+
     def makeChatMove(self, lastMove):
         failcnt = 0
         move = None
@@ -205,6 +211,11 @@ class Game:
             time.sleep(self.vote_time)
 
             move, cnt, wasRandom = self.getMoveFromChat(self.b)
+
+            if move == "resign":
+                self.sendMessage("Resign won the poll. Resigning... :(")
+                self.cancelResignGame(self.gameid)
+                return
 
             if move is None:
                 self.sendMessage("No legal move was proposed, poll starts again.")
@@ -282,6 +293,24 @@ class Game:
 
         amIwhite = False
 
+        # start
+
+        print(self.twitch_channel, self.vote_time)
+        print(type(self.twitch_channel), type(self.vote_time))
+
+
+        self.getTwitchSocket()
+
+        #  start twitch chat reader async
+        twitch_thread = threading.Thread(target=self.startChatRead,
+                                     args=(self.twitch_socket, self.twitch_channel))
+        twitch_thread.start()
+
+        msg = "Configuration finished"
+        self.writeToLichessChat(msg)
+
+
+
         # read all events from game stream
         for line in r.iter_lines():
 
@@ -302,87 +331,8 @@ class Game:
                     if _game["id"] == self.gameid:
                         activeGames.remove(self.twitch_channel)
                         print("GAME FINISHED AND ABORTED")
+                        self.sendMessage("Bot disconnected")
                         return
-
-                # catch chat events in lichess, if not written by bot ( to avoid infinite loop )
-                if j["type"] == "chatLine" and not self.configured and j["username"] != "tuxbot":
-
-                    # parse text message
-                    text = j["text"]
-
-                    # if string consists of 2 words try to parse as twitch channel and timeout
-                    if len(text.split(" ")) == 2:
-                        self.twitch_channel, self.vote_time = text.split(" ")
-
-                        self.twitch_channel = self.twitch_channel.lower()
-
-                        # lookup if lichess account is allowed to connect to mentioned twitch channel
-                        if self.twitch_channel not in whitelist:
-                            msg = "The mentioned twitch channel is not on the whitelist"
-                            self.writeToLichessChat(msg)
-
-                            msg = "Please contanct tuxmania to set your channel up for the first time"
-                            self.writeToLichessChat(msg)
-
-                            # cancel accepted challenge
-                            Game.cancelResignGame(self.gameid)
-
-                            # leave main game loop
-                            return
-
-                        # if channel is in whitelist but user not allowed to start the bot
-                        if self.twitch_channel in whitelist and j["username"].lower() not in [x.lower() for x in
-                                                                                              whitelist[
-                                                                                                  self.twitch_channel]]:
-                            msg = "You are not allowed to start the bot for this twitch channel."
-                            self.writeToLichessChat(msg)
-
-                            Game.cancelResignGame(self.gameid)
-
-                            return
-
-                        if self.twitch_channel in activeGames:
-                            msg = "Game for channel {} is already running".format(self.twitch_channel)
-                            self.writeToLichessChat(msg)
-
-                            Game.cancelResignGame(self.gameid)
-
-                            # close game call
-                            return
-                        else:
-                            # if its legal to start bot, append channel to active games
-                            # so it cannot be started twice
-                            activeGames.append(self.twitch_channel)
-
-                        print(self.twitch_channel, self.vote_time)
-                        print(type(self.twitch_channel), type(self.vote_time))
-
-                    # check if vote_time is between 10 and 60
-                    try:
-                        self.vote_time = int(self.vote_time)
-
-                        if self.vote_time < 10 or self.vote_time > 60:
-                            self.writeToLichessChat("Error: Vote time not in range 10 60")
-                            continue
-                    except:
-                        self.writeToLichessChat("Error: vote time is not an integer")
-                        continue
-
-                    # set configuration flag to true
-                    self.configured = True
-
-                    self.getTwitchSocket()
-
-                    #  start twitch chat reader async
-                    twitch_thread = threading.Thread(target=self.startChatRead,
-                                                     args=(self.twitch_socket, self.twitch_channel))
-                    twitch_thread.start()
-
-                    msg = "Configuration finished"
-                    self.writeToLichessChat(msg)
-
-                    if amIwhite:
-                        self.makeChatMove(None)
 
                 if j["type"] == "gameFull":
 
@@ -391,22 +341,10 @@ class Game:
 
                     if j["white"]["id"] == "tuxbot":
                         amIwhite = True
+                        self.makeChatMove(None)
 
                     time.sleep(.5)
 
-                    msg = "To set bot up, please reply with following message, vote time has to be between 10 and 60, twitch channel name is case sensitive"
-                    msgjson = {"room": "player", "text": msg}
-                    _r = requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid), headers=header,
-                                       json=msgjson)
-                    print(_r.json())
-
-                    time.sleep(.5)
-
-                    msg = "<TWITCH_CHANNELNAME> <vote time in seconds>"
-                    msgjson = {"room": "player", "text": msg}
-                    _r = requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid), headers=header,
-                                       json=msgjson)
-                    print(_r.json())
 
                 if j["type"] == "gameState":
 
@@ -420,29 +358,10 @@ class Game:
                             pass
 
                         print("GAME FINISHED AND ABORTED")
+                        self.sendMessage("Bot disconnected")
                         return
 
                     moves = j["moves"]
-
-                    if not self.configured:
-                        time.sleep(.5)
-
-                        msg = "To set bot up, please reply with following message, vote time has to be between 10 and 60, twitch channel name is case sensitive"
-
-                        msgjson = {"room": "player", "text": msg}
-                        _r = requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid),
-                                           headers=header,
-                                           json=msgjson)
-                        print(_r.json())
-
-                        time.sleep(.5)
-
-                        msg = "<TWITCH_CHANNELNAME> <vote time in seconds>"
-                        msgjson = {"room": "player", "text": msg}
-                        _r = requests.post("https://lichess.org/api/bot/game/{}/chat".format(self.gameid),
-                                           headers=header,
-                                           json=msgjson)
-                        print(_r.json())
 
                     # format move list from server
                     evenlist = len(moves.split(" ")) % 2 == 0
@@ -462,28 +381,31 @@ class Game:
                         self.makeChatMove(playerSANmove)
 
 
-if __name__ == "__main__":
-
-    config = configparser.ConfigParser()
-    config.read("config.txt")
-
-    token = config["DEFAULT"]["LichessToken"]
-    twitch_token = config["DEFAULT"]["TwitchToken"]
-    header = {"Authorization": "Bearer {}".format(token)}
-
+def do_main_loop():
+    global whitelist
     # get ongoing games
+    print("d1")
+
     r = requests.get("https://lichess.org/api/account/playing", headers=header)
     ongoingGames = r.json()["nowPlaying"]
 
     ongoingGameIds = list()
 
+    print("d2")
+
     for game in ongoingGames:
         ongoingGameIds.append(game["gameId"])
+
+    print("d3")
 
     for gid in ongoingGameIds:
         Game.cancelResignGame(gid)
 
+    print("d4")
+
     r = requests.get("https://lichess.org/api/stream/event", headers=header, stream=True)
+
+    print("d5")
 
     with open('whitelist.txt', 'r') as read_file:
         whitelist = json.load(read_file)
@@ -499,6 +421,46 @@ if __name__ == "__main__":
 
             if j["type"] == "challenge":
                 _id = j["challenge"]["id"]
+                _user = j["challenge"]["challenger"]["id"]
+                if _user not in [x.lower() for x in whitelist.values()]:
+                    print("{} is not in white list".format(_user))
 
-                t = threading.Thread(target=Game, args=(_id,))
-                t.start()
+                    requests.post("https://lichess.org/api/challenge/{}/decline".format(_id), headers=header)
+
+                else:
+
+                    try:
+                        vote_time = int(j["challenge"]["timeControl"]["increment"])
+                    except:
+                        print("Error parsing vote time")
+                        return
+
+                    inv_map = {v.lower(): k.lower() for k, v in whitelist.items()}
+                    try:
+                        twitch_channel = inv_map[_user]
+                    except:
+                        print("Error doing reverse twitch lookup")
+                        return
+
+                    print("Starting for {} on {} with time {}".format(_user, twitch_channel, vote_time))
+
+                    t = threading.Thread(target=Game, args=(_id, twitch_channel, vote_time))
+                    t.start()
+
+if __name__ == "__main__":
+
+    print("started")
+    config = configparser.ConfigParser()
+    config.read("config.txt")
+
+    token = config["DEFAULT"]["LichessToken"]
+    twitch_token = config["DEFAULT"]["TwitchToken"]
+    header = {"Authorization": "Bearer {}".format(token)}
+
+    while True:
+        try:
+            print("exec main loop")
+            do_main_loop()
+        except:
+            print("aborted and restarted")
+
